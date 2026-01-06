@@ -1,0 +1,12 @@
+name = "codrive-api"
+main = "worker.js"
+compatibility_date = "2024-12-01"
+
+[durable_objects]
+bindings = [
+  { name = "CODRIVE_DO", class_name = "CoDriveDO" }
+]
+
+[[migrations]]
+tag = "v1"
+new_classes = ["CoDriveDO"]
