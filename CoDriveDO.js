@@ -1,10 +1,8 @@
 export class CoDriveDO {
   constructor(state, env) {
-    this.state = state;
     this.storage = state.storage;
   }
 
-  /* ---------- IST HELPERS ---------- */
   istNow() {
     return new Date(
       new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" })
@@ -18,78 +16,55 @@ export class CoDriveDO {
   async fetch(req) {
     const url = new URL(req.url);
 
-    /* =====================================================
-       VISITS
-    ===================================================== */
+    /* ---------- VISITS ---------- */
     if (url.searchParams.has("visit")) {
       const ip = req.headers.get("CF-Connecting-IP") || "x";
-      const date = this.istDate();
-      const visitKey = `visit:${ip}:${date}`;
-
-      const seen = await this.storage.get(visitKey);
-      if (!seen) {
-        await this.storage.put(visitKey, 1);
+      const key = `visit:${ip}:${this.istDate()}`;
+      if (!(await this.storage.get(key))) {
+        await this.storage.put(key, 1);
         const total = (await this.storage.get("visit_total")) || 0;
         await this.storage.put("visit_total", total + 1);
       }
-
-      const total = (await this.storage.get("visit_total")) || 1;
-      return this.json({ total });
+      return this.json({ ok: true });
     }
 
-    /* =====================================================
-       POST — SAVE PREFERENCE
-    ===================================================== */
+    /* ---------- SAVE ---------- */
     if (req.method === "POST") {
       const { date, from, to, time } = await req.json();
       if (!date || !from || !to || !time) {
-        return this.json({ error: "Invalid data" }, 400);
+        return this.json({ error: "Invalid" }, 400);
       }
 
       const ip = req.headers.get("CF-Connecting-IP") || "x";
-      const lockKey = `lock:${ip}`;
-
-      // Rate-limit: 1 minute
-      if (await this.storage.get(lockKey)) {
-        return this.json({ error: "Please wait 1 minute" }, 429);
+      const dayKey = `count:${ip}:${date}`;
+      const used = (await this.storage.get(dayKey)) || 0;
+      if (used >= 20) {
+        return this.json({ error: "Daily limit reached" }, 429);
       }
-      await this.storage.put(lockKey, 1, {
-        expiration: Date.now() + 60_000
+      await this.storage.put(dayKey, used + 1, {
+        expiration: Date.now() + 86400000
       });
 
-      const popKey = `pop:${date}:${from}:${to}:${time}`;
-      const idxKey = `idx:${date}:${from}:${to}`;
-
-      const count = (await this.storage.get(popKey)) || 0;
-      await this.storage.put(popKey, count + 1);
-
-      const idx = (await this.storage.get(idxKey)) || [];
-      if (!idx.includes(time)) {
-        idx.push(time);
-        await this.storage.put(idxKey, idx);
-      }
+      const key = `pop:${date}:${from}:${to}:${time}`;
+      const c = (await this.storage.get(key)) || 0;
+      await this.storage.put(key, c + 1);
 
       return this.json({ ok: true });
     }
 
-    /* =====================================================
-       GET POPULARITY
-    ===================================================== */
+    /* ---------- GET ---------- */
     const date = url.searchParams.get("date");
     const from = url.searchParams.get("from");
     const to = url.searchParams.get("to");
-
     if (!date || !from || !to) return this.json([]);
 
-    const idxKey = `idx:${date}:${from}:${to}`;
-    const idx = (await this.storage.get(idxKey)) || [];
-
     const out = [];
-    for (const t of idx) {
+    for (let m = 0; m < 1440; m += 30) {
+      const f=x=>String(x).padStart(2,"0");
+      const t=`${f(m/60|0)}:${f(m%60)}-${f((m+30)/60|0)}:${f((m+30)%60)}`;
       const c = (await this.storage.get(`pop:${date}:${from}:${to}:${t}`)) || 0;
       if (c > 0) out.push({ time: t, count: c });
     }
-
     return this.json(out);
   }
 
